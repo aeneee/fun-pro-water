@@ -1,0 +1,938 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Ripple - Ariyan Ahmed Emon </title>
+    <meta name="description" content="A page under still water. Move across it, drop a pebble, watch the words bend.">
+    <link rel="canonical" href="https://kamran.fyi/ripple">
+    <meta name="author" content="Ariyan Ahmed Emon">
+    <meta name="theme-color" content="#050607">
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link rel="icon" type="image/png" sizes="32x32" href="/manifest/favicon-32.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/manifest/apple-touch-icon.png">
+
+
+    <
+    <script type="application/ld+json">
+        {
+            "@context": "https://schema.org",
+            "@type": "WebApplication",
+            "name": "Ripple",
+            "url": "https://kamran.fyi/ripple",
+            "applicationCategory": "GameApplication",
+            "operatingSystem": "Any",
+            "description": "A page under still water. Ripples propagate, interfere and refract the text beneath the surface.",
+            "author": {
+                "@type": "Person",
+                "name": "Kamran Ahmed",
+                "url": "https://kamran.fyi"
+            }
+        }
+    </script>
+
+    <link rel="preconnect" href="https://www.google-analytics.com/">
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-QD7PX9C379"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+
+        function gtag() {
+            dataLayer.push(arguments);
+        }
+        gtag('js', new Date());
+        gtag('config', 'G-QD7PX9C379');
+    </script>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Funnel+Display:wght@700;800&family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #050607;
+            --text: #ece6da;
+            --muted: rgba(236, 230, 218, 0.4);
+            --mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        [hidden] {
+            display: none !important;
+        }
+
+        html,
+        body {
+            height: 100%;
+            overflow: hidden;
+            background: var(--bg);
+        }
+
+        body {
+            color: var(--text);
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: none;
+        }
+
+        canvas {
+            position: fixed;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        .sr {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            overflow: hidden;
+            clip: rect(0 0 0 0);
+            white-space: nowrap;
+        }
+
+        .hud {
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            font: 12px/1 var(--mono);
+            color: var(--muted);
+        }
+
+        .hud>* {
+            position: absolute;
+            pointer-events: auto;
+        }
+
+        .tl {
+            top: 18px;
+            left: 20px;
+            line-height: 1.8;
+        }
+
+        .tl a {
+            color: var(--muted);
+            text-decoration: none;
+        }
+
+        .tl a:hover {
+            color: var(--text);
+        }
+
+        .tr {
+            top: 14px;
+            right: 14px;
+            background: none;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 999px;
+            color: var(--muted);
+            font: inherit;
+            padding: 7px 12px;
+            cursor: pointer;
+        }
+
+        .tr:hover {
+            color: var(--text);
+            border-color: rgba(255, 255, 255, 0.24);
+        }
+
+        .hint {
+            left: 0;
+            right: 0;
+            bottom: 22px;
+            text-align: center;
+            pointer-events: none;
+            padding: 0 16px;
+        }
+        
+ 
+    </style>
+</head>
+
+<body>
+    <h1 class="sr">Still water.</h1>
+    
+
+
+    <canvas id="gl"></canvas>
+    <canvas id="fx"></canvas>
+    <div class="hud">
+        <div class="tl"><a href="/experiments"></a></div>
+        <button id="sound" class="tr" type="button">sound: on</button>
+        <div class="hint"><p class="made-by">Made By <span>Ariyan Ahmed Emon</span></p></div>
+        
+    </div>
+
+    <script>
+        const TAU = Math.PI * 2;
+        const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+        const lerp = (a, b, t) => a + (b - a) * t;
+        const rand = (a, b) => a + Math.random() * (b - a);
+
+        const glCanvas = document.getElementById('gl');
+        const fx = document.getElementById('fx');
+        const fctx = fx.getContext('2d');
+        const page = document.createElement('canvas');
+        const pctx = page.getContext('2d');
+        const soundBtn = document.getElementById('sound');
+
+        const CELL = 2.5;
+        const MAX_CELLS = 420000;
+        const STEP_HZ = 150;
+        const MAX_IMP = 16;
+
+        let W = 0,
+            H = 0,
+            DPR = 1;
+        let pageDirty = true;
+        let pageReady = false;
+        let simDirty = true;
+        let impulses = [];
+        let rings = [];
+
+        const pointer = {
+            x: 0,
+            y: 0,
+            px: 0,
+            py: 0,
+            has: false,
+            down: false,
+            downAt: 0,
+            nextDrip: 0
+        };
+
+        /* ---------- sound ---------- */
+
+        let ac = null;
+        let noise = null;
+        let muted = false;
+
+        function audio() {
+            if (ac) {
+                return ac;
+            }
+            try {
+                ac = new(window.AudioContext || window.webkitAudioContext)();
+            } catch (e) {
+                return null;
+            }
+            noise = ac.createBuffer(1, ac.sampleRate * 2, ac.sampleRate);
+            const d = noise.getChannelData(0);
+            for (let i = 0; i < d.length; i++) {
+                d[i] = Math.random() * 2 - 1;
+            }
+            return ac;
+        }
+
+        function ready() {
+            return !muted && ac && ac.state === 'running';
+        }
+
+        function tone(t, f0, f1, dur, gain, type = 'sine') {
+            const o = ac.createOscillator();
+            const g = ac.createGain();
+            o.type = type;
+            o.frequency.setValueAtTime(f0, t);
+            o.frequency.exponentialRampToValueAtTime(f1, t + dur * 0.6);
+            g.gain.setValueAtTime(0.0001, t);
+            g.gain.exponentialRampToValueAtTime(gain, t + 0.004);
+            g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+            o.connect(g).connect(ac.destination);
+            o.start(t);
+            o.stop(t + dur + 0.02);
+        }
+
+        function splash(t, freq, gain) {
+            const s = ac.createBufferSource();
+            s.buffer = noise;
+            const f = ac.createBiquadFilter();
+            f.type = 'bandpass';
+            f.frequency.value = freq;
+            f.Q.value = 1.2;
+            const g = ac.createGain();
+            g.gain.setValueAtTime(gain, t);
+            g.gain.exponentialRampToValueAtTime(0.0001, t + 0.06);
+            s.connect(f).connect(g).connect(ac.destination);
+            s.start(t, Math.random());
+            s.stop(t + 0.08);
+        }
+
+        function sfxPlip(size = 1, vol = 1) {
+            if (!ready()) {
+                return;
+            }
+            const t = ac.currentTime + 0.002;
+            const f = rand(620, 980) / Math.sqrt(size);
+            splash(t, rand(2200, 3400), 0.035 * vol);
+            tone(t + 0.008, f, f * rand(2.1, 2.8), rand(0.07, 0.11), 0.11 * vol);
+            tone(t, 160 / size, 80 / size, 0.06, 0.035 * vol);
+        }
+
+        /* ---------- page texture ---------- */
+
+        function renderPage() {
+            page.width = Math.round(W * DPR);
+            page.height = Math.round(H * DPR);
+            const c = pctx;
+            c.setTransform(DPR, 0, 0, DPR, 0, 0);
+            c.fillStyle = '#050607';
+            c.fillRect(0, 0, W, H);
+
+            c.strokeStyle = 'rgba(255,255,255,0.05)';
+            c.lineWidth = 1;
+            c.beginPath();
+            const x0 = (W / 2) % 76;
+            for (let x = x0; x < W; x += 76) {
+                c.moveTo(Math.round(x) + 0.5, 0);
+                c.lineTo(Math.round(x) + 0.5, H);
+            }
+            for (let y = 0; y < H; y += 76) {
+                c.moveTo(0, Math.round(y) + 0.5);
+                c.lineTo(W, Math.round(y) + 0.5);
+            }
+            c.stroke();
+
+            const cy = H * 0.5;
+            const size = clamp(W * 0.085, 44, 120);
+            c.font = `800 ${size}px "Funnel Display"`;
+            if ('letterSpacing' in c) {
+                c.letterSpacing = `${-size * 0.012}px`;
+            }
+            const a = 'Still ';
+            const b = 'water';
+            const d = '.';
+            const wa = c.measureText(a).width;
+            const wb = c.measureText(b).width;
+            const wd = c.measureText(d).width;
+            const left = W / 2 - (wa + wb + wd) / 2;
+            const base = cy + size * 0.3;
+            c.textAlign = 'left';
+            c.textBaseline = 'alphabetic';
+            c.fillStyle = '#ece6da';
+            c.fillText(a, left, base);
+            const grad = c.createLinearGradient(left + wa, 0, left + wa + wb, 0);
+            grad.addColorStop(0, '#f3c98f');
+            grad.addColorStop(0.55, '#f7dcb2');
+            grad.addColorStop(1, '#e8a86e');
+            c.fillStyle = grad;
+            c.fillText(b, left + wa, base);
+            c.fillStyle = '#ece6da';
+            c.fillText(d, left + wa + wb, base);
+            if ('letterSpacing' in c) {
+                c.letterSpacing = '0px';
+            }
+
+            pageDirty = true;
+            if (!progs) {
+                fctx.setTransform(1, 0, 0, 1, 0, 0);
+                fctx.drawImage(page, 0, 0);
+            }
+        }
+
+        /* ---------- webgl ---------- */
+
+        const gl = glCanvas.getContext('webgl', {
+            antialias: false,
+            premultipliedAlpha: false,
+            alpha: false
+        });
+        let progs = null;
+        let fmt = null;
+        let pageTex = null;
+        let sim = [];
+        let prep = null;
+        let simW = 0,
+            simH = 0;
+        let accum = 0;
+        const segBuf = new Float32Array(MAX_IMP * 4);
+        const parBuf = new Float32Array(MAX_IMP * 4);
+
+        function makeTarget(w, h, type, filter) {
+            const tex = gl.createTexture();
+            gl.bindTexture(gl.TEXTURE_2D, tex);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, type, null);
+            const fb = gl.createFramebuffer();
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+            const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+            return {
+                tex,
+                fb,
+                ok
+            };
+        }
+
+        function dropTarget(t) {
+            if (!t) {
+                return;
+            }
+            gl.deleteTexture(t.tex);
+            gl.deleteFramebuffer(t.fb);
+        }
+
+        function renderable(type) {
+            const t = makeTarget(4, 4, type, gl.NEAREST);
+            dropTarget(t);
+            return t.ok;
+        }
+
+        function pickFormat() {
+            const f = gl.getExtension('OES_texture_float');
+            gl.getExtension('WEBGL_color_buffer_float');
+            if (f && renderable(gl.FLOAT)) {
+                return {
+                    type: gl.FLOAT,
+                    packed: false,
+                    linear: !!gl.getExtension('OES_texture_float_linear')
+                };
+            }
+            const hf = gl.getExtension('OES_texture_half_float');
+            gl.getExtension('EXT_color_buffer_half_float');
+            if (hf && renderable(hf.HALF_FLOAT_OES)) {
+                return {
+                    type: hf.HALF_FLOAT_OES,
+                    packed: false,
+                    linear: !!gl.getExtension('OES_texture_half_float_linear')
+                };
+            }
+            return {
+                type: gl.UNSIGNED_BYTE,
+                packed: true,
+                linear: false
+            };
+        }
+
+        const VS = 'attribute vec2 p; void main(){ gl_Position = vec4(p, 0.0, 1.0); }';
+
+        function simHeader() {
+            return `
+precision highp float;
+#define PACKED ${fmt.packed ? 1 : 0}
+uniform sampler2D uSim;
+uniform vec2 uSimSize;
+const float Z = 128.0 / 255.0;
+
+vec2 rd(vec2 uv) {
+#if PACKED
+  vec4 t = texture2D(uSim, uv);
+  return (vec2(t.r + t.g / 255.0, t.b + t.a / 255.0) - Z) * 16.0;
+#else
+  return texture2D(uSim, uv).rg;
+#endif
+}
+
+vec4 wr(vec2 s) {
+#if PACKED
+  vec2 a = clamp(s / 16.0 + Z, 0.0, 0.99998) * 255.0;
+  vec2 hi = floor(a);
+  return vec4(hi.x / 255.0, a.x - hi.x, hi.y / 255.0, a.y - hi.y);
+#else
+  return vec4(s, 0.0, 1.0);
+#endif
+}
+`;
+        }
+
+        const IMPULSE_FS = () => `${simHeader()}
+uniform vec4 uSeg[${MAX_IMP}];
+uniform vec4 uPar[${MAX_IMP}];
+uniform int uCount;
+uniform float uClear;
+
+void main() {
+  vec2 uv = gl_FragCoord.xy / uSimSize;
+  vec2 s = rd(uv) * (1.0 - uClear);
+  vec2 p = gl_FragCoord.xy;
+  for (int i = 0; i < ${MAX_IMP}; i++) {
+    if (i >= uCount) { break; }
+    vec2 a = uSeg[i].xy;
+    vec2 ab = uSeg[i].zw - a;
+    float t = clamp(dot(p - a, ab) / max(dot(ab, ab), 1e-4), 0.0, 1.0);
+    float d = length(p - a - ab * t);
+    float f = max(0.0, 1.0 - d / uPar[i].x);
+    float bump = 0.5 - 0.5 * cos(f * 3.14159265);
+    s.x += bump * uPar[i].y * mix(1.0, cos((1.0 - f) * 7.0), uPar[i].z);
+  }
+  gl_FragColor = wr(s);
+}`;
+
+        const STEP_FS = () => `${simHeader()}
+uniform float uDamp;
+
+void main() {
+  vec2 px = 1.0 / uSimSize;
+  vec2 uv = gl_FragCoord.xy * px;
+  vec2 s = rd(uv);
+  float side = rd(uv - vec2(px.x, 0.0)).x + rd(uv + vec2(px.x, 0.0)).x +
+    rd(uv - vec2(0.0, px.y)).x + rd(uv + vec2(0.0, px.y)).x;
+  float diag = rd(uv - px).x + rd(uv + px).x +
+    rd(uv + vec2(px.x, -px.y)).x + rd(uv + vec2(-px.x, px.y)).x;
+  float avg = (side * 4.0 + diag) / 20.0;
+  s.y += (avg - s.x) * 2.0;
+  vec2 e = min(gl_FragCoord.xy, uSimSize - gl_FragCoord.xy);
+  float edge = smoothstep(0.0, 14.0, min(e.x, e.y));
+  s.y *= mix(0.93, uDamp, edge);
+  s.x += s.y;
+  s.x *= 0.9992;
+  gl_FragColor = wr(s);
+}`;
+
+        const PREP_FS = () => `${simHeader()}
+#define ENC ${fmt.linear ? 0 : 1}
+const vec4 K = vec4(0.08, 0.08, 0.4, 0.08);
+
+void main() {
+  vec2 px = 1.0 / uSimSize;
+  vec2 uv = gl_FragCoord.xy * px;
+  float h = rd(uv).x;
+  float l = rd(uv - vec2(px.x, 0.0)).x;
+  float r = rd(uv + vec2(px.x, 0.0)).x;
+  float d = rd(uv - vec2(0.0, px.y)).x;
+  float u = rd(uv + vec2(0.0, px.y)).x;
+  vec4 o = vec4((r - l) * 0.5, (u - d) * 0.5, h, l + r + u + d - 4.0 * h);
+#if ENC
+  gl_FragColor = Z + (127.0 / 255.0) * o / (abs(o) + K);
+#else
+  gl_FragColor = o;
+#endif
+}`;
+
+        const RENDER_FS = () => `
+precision highp float;
+#define ENC ${fmt.linear ? 0 : 1}
+uniform sampler2D uPage;
+uniform sampler2D uPrep;
+uniform vec2 uRes;
+uniform float uTime;
+uniform float uDpr;
+const vec4 K = vec4(0.08, 0.08, 0.4, 0.08);
+
+vec4 water(vec2 uv) {
+  vec4 e = texture2D(uPrep, uv);
+#if ENC
+  vec4 m = clamp((e - 128.0 / 255.0) * (255.0 / 127.0), -0.995, 0.995);
+  return K * m / (1.0 - abs(m));
+#else
+  return e;
+#endif
+}
+
+void main() {
+  vec2 fc = gl_FragCoord.xy;
+  vec4 w = water(fc / uRes);
+  vec2 q = fc / uDpr;
+  float t = uTime;
+  vec2 g = w.xy;
+  g += 0.0009 * vec2(
+    sin(q.x * 0.019 + t * 0.7 + 1.7 * sin(q.y * 0.011 - t * 0.43)),
+    sin(q.y * 0.023 - t * 0.6 + 1.9 * sin(q.x * 0.013 + t * 0.37))
+  );
+
+  vec2 p = vec2(fc.x, uRes.y - fc.y);
+  vec2 off = vec2(-g.x, g.y) * 70.0 * uDpr;
+  vec3 col = vec3(
+    texture2D(uPage, (p + off * 1.06) / uRes).r,
+    texture2D(uPage, (p + off) / uRes).g,
+    texture2D(uPage, (p + off * 0.94) / uRes).b
+  );
+
+  vec3 n = normalize(vec3(-g * 5.0, 1.0));
+  vec3 L = normalize(vec3(-0.42, 0.5, 0.75));
+  vec3 Hv = normalize(L + vec3(0.0, 0.0, 1.0));
+  float nh = max(dot(n, Hv), 0.0);
+  float spec = pow(nh, 260.0);
+  float glow = pow(nh, 40.0);
+  float slope = length(g) * 5.0;
+  vec3 R = reflect(vec3(0.0, 0.0, -1.0), n);
+  vec3 moon = vec3(0.86, 0.9, 1.0);
+
+  float caustic = clamp(-w.w * 6.0, -0.35, 0.8);
+  col *= 1.0 + caustic * 0.55;
+  col += vec3(0.95, 0.82, 0.62) * max(caustic, 0.0) * 0.025;
+
+  col += vec3(0.05, 0.065, 0.09) * smoothstep(0.02, 0.5, slope) * (0.7 + 0.6 * R.y);
+  col += moon * (spec * 0.85 + glow * 0.07);
+
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
+        function program(fsSrc, names) {
+            const compile = (type, src) => {
+                const sh = gl.createShader(type);
+                gl.shaderSource(sh, src);
+                gl.compileShader(sh);
+                if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+                    throw new Error(gl.getShaderInfoLog(sh));
+                }
+                return sh;
+            };
+            const prog = gl.createProgram();
+            gl.attachShader(prog, compile(gl.VERTEX_SHADER, VS));
+            gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, fsSrc));
+            gl.bindAttribLocation(prog, 0, 'p');
+            gl.linkProgram(prog);
+            if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+                throw new Error(gl.getProgramInfoLog(prog));
+            }
+            const u = {};
+            names.forEach((n) => {
+                u[n] = gl.getUniformLocation(prog, n);
+            });
+            return {
+                prog,
+                u
+            };
+        }
+
+        function buildGL() {
+            if (!gl) {
+                return;
+            }
+            fmt = pickFormat();
+            const built = {
+                impulse: program(IMPULSE_FS(), ['uSim', 'uSimSize', 'uSeg', 'uPar', 'uCount', 'uClear']),
+                step: program(STEP_FS(), ['uSim', 'uSimSize', 'uDamp']),
+                prep: program(PREP_FS(), ['uSim', 'uSimSize']),
+                render: program(RENDER_FS(), ['uPage', 'uPrep', 'uRes', 'uTime', 'uDpr']),
+            };
+            const buf = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+            gl.enableVertexAttribArray(0);
+            gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+            pageTex = gl.createTexture();
+            gl.bindTexture(gl.TEXTURE_2D, pageTex);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            progs = built;
+        }
+
+        function buildSim() {
+            simDirty = false;
+            if (!progs) {
+                return;
+            }
+            sim.forEach(dropTarget);
+            dropTarget(prep);
+            let cell = CELL;
+            while ((W / cell) * (H / cell) > MAX_CELLS) {
+                cell += 0.25;
+            }
+            simW = Math.max(8, Math.ceil(W / cell));
+            simH = Math.max(8, Math.ceil(H / cell));
+            sim = [makeTarget(simW, simH, fmt.type, gl.NEAREST), makeTarget(simW, simH, fmt.type, gl.NEAREST)];
+            prep = makeTarget(simW, simH, fmt.linear ? fmt.type : gl.UNSIGNED_BYTE, gl.LINEAR);
+            simPass(progs.impulse, (u) => {
+                gl.uniform1i(u.uCount, 0);
+                gl.uniform1f(u.uClear, 1);
+            });
+            simPass(progs.impulse, (u) => {
+                gl.uniform1i(u.uCount, 0);
+                gl.uniform1f(u.uClear, 1);
+            });
+        }
+
+        function simPass(p, setup, target) {
+            gl.useProgram(p.prog);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, (target || sim[1]).fb);
+            gl.viewport(0, 0, simW, simH);
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, sim[0].tex);
+            gl.uniform1i(p.u.uSim, 0);
+            gl.uniform2f(p.u.uSimSize, simW, simH);
+            setup(p.u);
+            gl.drawArrays(gl.TRIANGLES, 0, 3);
+            if (target) {
+                return;
+            }
+            sim.reverse();
+        }
+
+        function toSim(x, y) {
+            return [x / W * simW, (1 - y / H) * simH];
+        }
+
+        function applyImpulses() {
+            while (impulses.length) {
+                const batch = impulses.splice(0, MAX_IMP);
+                segBuf.fill(0);
+                parBuf.fill(0);
+                batch.forEach((m, i) => {
+                    const [ax, ay] = toSim(m.x0, m.y0);
+                    const [bx, by] = toSim(m.x1, m.y1);
+                    segBuf.set([ax, ay, bx, by], i * 4);
+                    parBuf.set([Math.max(1.5, m.r / W * simW), m.s, m.crown, 0], i * 4);
+                });
+                simPass(progs.impulse, (u) => {
+                    gl.uniform4fv(u.uSeg, segBuf);
+                    gl.uniform4fv(u.uPar, parBuf);
+                    gl.uniform1i(u.uCount, batch.length);
+                    gl.uniform1f(u.uClear, 0);
+                });
+            }
+        }
+
+        function simulate(dt) {
+            if (!progs) {
+                return;
+            }
+            applyImpulses();
+            accum += dt;
+            const n = Math.min(6, Math.floor(accum * STEP_HZ));
+            accum = clamp(accum - n / STEP_HZ, 0, 1 / STEP_HZ);
+            for (let i = 0; i < n; i++) {
+                simPass(progs.step, (u) => {
+                    gl.uniform1f(u.uDamp, 0.9955);
+                });
+            }
+            simPass(progs.prep, () => {}, prep);
+        }
+
+        function drawGL(time) {
+            if (!progs) {
+                return;
+            }
+            const r = progs.render;
+            gl.useProgram(r.prog);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+            gl.viewport(0, 0, glCanvas.width, glCanvas.height);
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, pageTex);
+            if (pageDirty) {
+                gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, page);
+                pageDirty = false;
+            }
+            gl.activeTexture(gl.TEXTURE1);
+            gl.bindTexture(gl.TEXTURE_2D, prep.tex);
+            gl.uniform1i(r.u.uPage, 0);
+            gl.uniform1i(r.u.uPrep, 1);
+            gl.uniform2f(r.u.uRes, glCanvas.width, glCanvas.height);
+            gl.uniform1f(r.u.uTime, time);
+            gl.uniform1f(r.u.uDpr, DPR);
+            gl.drawArrays(gl.TRIANGLES, 0, 3);
+        }
+
+        /* ---------- water ---------- */
+
+        function disturb(x0, y0, x1, y1, r, s, crown = 0) {
+            if (!progs) {
+                return;
+            }
+            impulses.push({
+                x0,
+                y0,
+                x1,
+                y1,
+                r,
+                s,
+                crown
+            });
+            if (impulses.length > MAX_IMP * 4) {
+                impulses.splice(0, impulses.length - MAX_IMP * 4);
+            }
+        }
+
+        function pebble(x, y, size = 1, vol = 1) {
+            disturb(x, y, x, y, 18 * size, -2.6 * size, 0.6);
+            rings.push({
+                x,
+                y,
+                r: 4,
+                life: 1
+            });
+            sfxPlip(size, vol);
+        }
+
+        function wake(dt) {
+            if (!pointer.has) {
+                return;
+            }
+            const dx = pointer.x - pointer.px;
+            const dy = pointer.y - pointer.py;
+            const len = Math.hypot(dx, dy);
+            if (len < 0.5) {
+                return;
+            }
+            const speed = len / Math.max(dt, 1 / 240);
+            const s = clamp(speed / 1400, 0, 1);
+            disturb(pointer.px, pointer.py, pointer.x, pointer.y, 14 + s * 10, -0.28 * s - 0.03);
+            pointer.px = pointer.x;
+            pointer.py = pointer.y;
+        }
+
+        function drip(now) {
+            if (!pointer.down || now - pointer.downAt < 260 || now < pointer.nextDrip) {
+                return;
+            }
+            pointer.nextDrip = now + rand(70, 130);
+            pebble(pointer.x + rand(-7, 7), pointer.y + rand(-7, 7), rand(0.55, 0.8), 0.45);
+        }
+
+        let nextRain = performance.now() + 1400;
+
+        function ambient(now) {
+            if (now < nextRain) {
+                return;
+            }
+            nextRain = now + rand(2600, 6500);
+            const x = rand(0.06, 0.94) * W;
+            const y = rand(0.08, 0.92) * H;
+            disturb(x, y, x, y, rand(7, 10), -rand(0.5, 0.8), 0.5);
+            rings.push({
+                x,
+                y,
+                r: 3,
+                life: 0.7
+            });
+        }
+
+        /* ---------- fallback ---------- */
+
+        function drawFallback(dt) {
+            if (progs) {
+                return;
+            }
+            fctx.setTransform(1, 0, 0, 1, 0, 0);
+            fctx.drawImage(page, 0, 0);
+            fctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+            for (const r of rings) {
+                r.r += 140 * dt;
+                r.life -= dt * 0.7;
+                fctx.strokeStyle = `rgba(220,230,255,${clamp(r.life, 0, 1) * 0.3})`;
+                fctx.lineWidth = 1.2;
+                fctx.beginPath();
+                fctx.arc(r.x, r.y, r.r, 0, TAU);
+                fctx.stroke();
+            }
+            rings = rings.filter((r) => r.life > 0);
+        }
+
+        /* ---------- input ---------- */
+
+        function place(e) {
+            pointer.x = e.clientX;
+            pointer.y = e.clientY;
+            if (pointer.has) {
+                return;
+            }
+            pointer.px = pointer.x;
+            pointer.py = pointer.y;
+            pointer.has = true;
+        }
+
+        fx.addEventListener('pointermove', (e) => {
+            place(e);
+        });
+        fx.addEventListener('pointerdown', (e) => {
+            const a = audio();
+            if (a && a.state === 'suspended') {
+                a.resume();
+            }
+            try {
+                fx.setPointerCapture(e.pointerId);
+            } catch (err) {
+                console.warn('pointer capture failed', err);
+            }
+            place(e);
+            pointer.down = true;
+            pointer.downAt = performance.now();
+            pointer.nextDrip = 0;
+            pebble(e.clientX, e.clientY);
+            if (a && a.state !== 'running') {
+                a.resume().then(() => sfxPlip()).catch(() => {});
+            }
+        });
+
+        function up(e) {
+            pointer.down = false;
+            if (e.pointerType === 'mouse') {
+                return;
+            }
+            pointer.has = false;
+        }
+        fx.addEventListener('pointerup', up);
+        fx.addEventListener('pointercancel', up);
+        fx.addEventListener('pointerleave', () => {
+            pointer.has = false;
+        });
+        soundBtn.addEventListener('click', () => {
+            muted = !muted;
+            soundBtn.textContent = muted ? 'sound: off' : 'sound: on';
+        });
+
+        function resize() {
+            DPR = Math.min(window.devicePixelRatio || 1, 2);
+            W = window.innerWidth;
+            H = window.innerHeight;
+            glCanvas.width = fx.width = Math.round(W * DPR);
+            glCanvas.height = fx.height = Math.round(H * DPR);
+            simDirty = true;
+            if (pageReady) {
+                renderPage();
+            }
+        }
+        window.addEventListener('resize', resize);
+
+        /* ---------- loop ---------- */
+
+        let last = performance.now();
+
+        function frame(now) {
+            const dt = Math.min(0.04, (now - last) / 1000);
+            last = now;
+            if (simDirty) {
+                buildSim();
+            }
+            wake(dt);
+            drip(now);
+            ambient(now);
+            simulate(dt);
+            drawGL(now / 1000);
+            drawFallback(dt);
+            if (progs) {
+                rings.length = 0;
+            }
+            requestAnimationFrame(frame);
+        }
+
+        async function boot() {
+            resize();
+            try {
+                buildGL();
+            } catch (e) {
+                progs = null;
+                console.warn('WebGL unavailable, falling back', e);
+            }
+            try {
+                await Promise.all([
+                    document.fonts.load('800 80px "Funnel Display"'),
+                    document.fonts.load('500 12px "Geist Mono"'),
+                ]);
+            } catch (e) {
+                console.warn('fonts not loaded', e);
+            }
+            pageReady = true;
+            renderPage();
+            requestAnimationFrame(frame);
+        }
+
+        boot();
+    </script>
+    <script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/vce701823e78c4301a35b7e07294d87301792088814092" integrity="sha512-UKNk8GbxkABxKcXYuLkO16EleLGUkcvJWtpSNmExE0Too3ZaFAxTscNWEc1OdAv5/BikHawapSCaiD2XCmp+Bw==" data-cf-beacon='{"version":"2024.11.0","token":"59f32a06f3f4429e98ac99c9ac3ddde7","r":1,"spa":2}'
+        crossorigin="anonymous"></script>
+</body>
+
+</html>
